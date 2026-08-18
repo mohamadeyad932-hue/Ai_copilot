@@ -1,0 +1,8 @@
+{
+    "app_name": "ProjectAlpha",
+    "version": "1.0.0",
+    "features": {
+        "dark_mode": true,
+        "auto_save": false
+    }
+}

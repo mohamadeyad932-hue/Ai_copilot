@@ -1,27 +1,21 @@
-# Use official lightweight Python 3.11 image
+# استخدام صورة Python 3.11 خفيفة ومستقرة
 FROM python:3.11-slim
 
-# Prevent Python from writing pyc files to disc and enable unbuffered output
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-
-# Set working directory inside container
+# ضبط مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# Install system dependencies if required
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# منع بايثون من كتابة ملفات .pyc وإرسال المخرجات مباشرة إلى الـ Terminal بدون تأخير
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Copy requirements file and install dependencies
+# نسخ ملف المتطلبات أولاً للاستفادة من كاش الدوكر
 COPY requirements.txt .
+
+# تثبيت الحزم المطلوبة
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code
+# نسخ باقي ملفات المشروع إلى داخل الحاوية
 COPY . .
 
-# Expose port 8000 for the app
-EXPOSE 8000
-
-# Run FastAPI application using Uvicorn web server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# الأمر الافتراضي لتشغيل السكربت
+CMD ["python", "cal_api_llm.py"]

@@ -1,21 +1,16 @@
-# استخدام صورة Python 3.11 خفيفة ومستقرة
 FROM python:3.11-slim
 
-# ضبط مجلد العمل داخل الحاوية
 WORKDIR /app
 
-# منع بايثون من كتابة ملفات .pyc وإرسال المخرجات مباشرة إلى الـ Terminal بدون تأخير
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# نسخ ملف المتطلبات أولاً للاستفادة من كاش الدوكر
 COPY requirements.txt .
+RUN pip install --no-cache-dir --prefer-binary -r requirements.txt
 
-# تثبيت الحزم المطلوبة
-RUN pip install --no-cache-dir -r requirements.txt
+COPY app ./app
+COPY main.py .
 
-# نسخ باقي ملفات المشروع إلى داخل الحاوية
-COPY . .
+EXPOSE 8005
 
-# الأمر الافتراضي لتشغيل السكربت
-CMD ["python", "cal_api_llm.py"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8005"]

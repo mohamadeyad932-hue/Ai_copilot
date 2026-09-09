@@ -1,29 +1,32 @@
-# Environment variables (مهم لحماية المفاتيح من الرفع على GitHub)
+# Environment variables
 .env
 .env.local
 .env.*.local
 
-# Python cache & bytecode
+# Project Reports / Local Documentation
+PROJECT_REPORT.md
+
+# Python / Pycache / Virtual Environments
 __pycache__/
 *.py[cod]
 *$py.class
-*.pyc
-*.pyo
-*.pyd
-
-# Virtual Environments
-venv/
 .venv/
-env/
+venv/
 ENV/
-env.bak/
-venv.bak/
+env/
+.pytest_cache/
 
-# IDEs & Editors
+# Node / JS artifacts (if any)
+node_modules/
+dist/
+build/
+npm-debug.log*
+
+# IDE / System
 .vscode/
 .idea/
-*.swp
-*.swo
+.DS_Store
+Thumbs.db
 
 # Logs
 *.log

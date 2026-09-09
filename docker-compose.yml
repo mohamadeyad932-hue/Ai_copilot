@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  ai-copilot-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai_copilot_service
+    ports:
+      - "8005:8005"
+    env_file:
+      - .env
+    environment:
+      - PORT=8005
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
+      - MODEL_NAME=${MODEL_NAME:-openai/gpt-4o-mini}
+      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-15.0}
+    restart: unless-stopped

@@ -1,32 +1,33 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Project Reports / Local Documentation
-PROJECT_REPORT.md
-
-# Python / Pycache / Virtual Environments
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
-.venv/
+
+# Virtual environments
 venv/
-ENV/
 env/
-.pytest_cache/
+.venv/
 
-# Node / JS artifacts (if any)
-node_modules/
-dist/
-build/
-npm-debug.log*
+# Environment variables & secrets
+.env
+!.env.example
 
-# IDE / System
-.vscode/
+# Vector Databases & local storage
+vector_db/
+chroma_db/
+*.sqlite3
+*.db
+
+# IDEs and Editors
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# OS generated files
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
+logs/

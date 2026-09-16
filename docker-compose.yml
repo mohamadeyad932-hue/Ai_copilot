@@ -1,19 +1,20 @@
 version: '3.8'
 
 services:
-  ai-copilot-service:
+  rag-app:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: ai_copilot_service
+    container_name: rag_copilot_service
     ports:
-      - "8005:8005"
+      - "8000:8000"
     env_file:
       - .env
-    environment:
-      - PORT=8005
-      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://openrouter.ai/api/v1}
-      - MODEL_NAME=${MODEL_NAME:-openai/gpt-4o-mini}
-      - AI_TIMEOUT_SECONDS=${AI_TIMEOUT_SECONDS:-15.0}
+    volumes:
+      - .:/app
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

@@ -1,16 +1,29 @@
+# Git & Docker configs
+.git
+.gitignore
+.dockerignore
+README.md
+Dockerfile
+docker-compose.yml
+
+# Python cache & virtual environments
 __pycache__
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-.venv/
-.pytest_cache/
-.env
-.git
-.gitignore
-Dockerfile
-docker-compose.yml
-node_modules
-dist
+.venv
+venv
+env
+
+# Vector databases & temporary storage
+vector_db/
+chroma_db/
+*.sqlite3
+*.db
+
+# IDEs & OS files
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+*.log

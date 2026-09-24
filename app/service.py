@@ -1,158 +1,154 @@
+"""
+RAG Service — الخدمة الرئيسية
+تربط بين: رفع PDF → تحويل Markdown → تقطيع ذكي → تضمين → فهرسة → استرجاع → إجابة
+"""
 import os
-from typing import Dict, Any
+import re
+from typing import Dict, Any, List
 from app.config import settings
-from app.reader import read_text_file, parse_articles
-from app.chunker import bad_chunking, good_chunking
+from app.reader import convert_pdf_bytes_to_markdown
+from app.chunker import smart_chunk
 from app.embedder import Embedder
 from app.vector_store import LocalVectorStore
 from app.llm import OpenRouterLLM
 from app.models import (
-    SearchQuery,
-    SearchResponse,
-    ChunkingComparisonResult,
-    RAGRequest,
-    RAGResponse,
     HealthResponse,
     SimpleAskRequest,
-    SimpleAnswerResponse
+    SimpleAnswerResponse,
+    UploadResponse,
+    SearchResultItem,
 )
 
 
 class RAGService:
     """
     منسق خدمة RAG الرئيسية (Service Layer).
-    يربط بين قراءة البيانات، التقطيع، التضمين، مخازن المتجهات المحلية، وتوليد الإجابات من OpenRouter LLM.
+    يربط بين رفع PDF، تحويل Markdown، التقطيع الذكي، التضمين، الفهرسة، والإجابة.
     """
     def __init__(self):
         self.embedder = Embedder()
-        self.good_store = LocalVectorStore(collection_name="good_chunks_store", storage_dir=settings.vector_db_dir)
-        self.bad_store = LocalVectorStore(collection_name="bad_chunks_store", storage_dir=settings.vector_db_dir)
+        self.store = LocalVectorStore(
+            collection_name="documents_store",
+            storage_dir=settings.vector_db_dir,
+        )
         self.llm = OpenRouterLLM()
-        self.articles_count = 0
+        self.documents_count = 0
+        self.total_chunks = 0
 
-    def initialize_and_index(self, data_file_path: str = None) -> Dict[str, Any]:
-        path = data_file_path or settings.data_file_path
+    def process_uploaded_pdf(self, pdf_bytes: bytes, filename: str) -> UploadResponse:
+        """
+        معالجة ملف PDF مرفوع:
+        1. تحويل إلى Markdown عبر LlamaParse API
+        2. تقطيع ذكي (MarkdownHeaderSplit + Context Injection)
+        3. تضمين وفهرسة في المخزن المتجهي
+        """
+        # الخطوة 1: تحويل PDF → Markdown
+        markdown_text = convert_pdf_bytes_to_markdown(pdf_bytes, filename)
         
-        if not os.path.exists(path):
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            sample_data = """المادة 1: نطاق سريان اللائحة
-تسري أحكام هذه اللائحة على جميع الموظفين والمتدربين في الشركة، وتحدد حقوقهم وواجباتهم الوظيفية.
-
-المادة 2: ساعات العمل الرسمية
-تكون ساعات العمل الرسمية 8 ساعات يومياً تبدأ من الساعة 8 صباحاً حتى 4 مساءً، بمعدل 40 ساعة أسبوعياً. يحق للإدارة تعديل المواعيد خلال شهر رمضان المبارك.
-
-المادة 3: العمل الإضافي والتعويض
-يُحسب العمل الإضافي بموافقة خطية مسبقة من المدير المباشر، ويكون أجر الساعة الإضافية معادلاً لأجر الساعة العادية مضافاً إليه 50% من الراتب الأساسي.
-
-المادة 4: الإجازة السنوية
-يستحق الموظف إجازة سنوية مدفوعة الأجر مدتها 30 يوماً عن كل عام من أعوام الخدمة، ولا يجوز النزول عنها أو التنازل عن مقابلها المالي إلا بموافقة مجلس الإدارة.
-
-المادة 5: إنهاء عقد العمل
-يجوز لأي من الطرفين إنهاء العقد غير محدد المدة بإشعار خطي مدته لا تقل عن 60 يوماً قبل موعد الإنهاء، وفي حال عدم الالتزام بالإشعار يدفع الطرف المخالف تعويضاً يعادل أجر مهلة الإشعار."""
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(sample_data)
-
-        raw_text = read_text_file(path)
-        articles = parse_articles(raw_text)
-        self.articles_count = len(articles)
-
-        bad_chunks = bad_chunking(raw_text, chunk_size=35, overlap=0)
-        good_chunks = good_chunking(articles, target_chunk_size=200, overlap=40)
-
-        all_texts = [c.text for c in bad_chunks] + [c.text for c in good_chunks]
+        # حفظ نسخة Markdown محلياً (اختياري للمرجعية)
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        md_path = os.path.join(settings.upload_dir, f"{os.path.splitext(filename)[0]}.md")
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(markdown_text)
+        
+        # الخطوة 2: التقطيع الذكي
+        chunks = smart_chunk(markdown_text, max_chunk_size=500, overlap=80)
+        
+        if not chunks:
+            return UploadResponse(
+                message="تم تحويل الملف لكن لم يتم استخراج أي قطع نصية.",
+                filename=filename,
+                chunks_count=0,
+                markdown_preview=markdown_text[:500],
+            )
+        
+        # الخطوة 3: التضمين والفهرسة
+        all_texts = [c.text for c in chunks]
         self.embedder.fit_vocabulary(all_texts)
-
-        bad_vectors = self.embedder.embed_batch([c.text for c in bad_chunks])
-        good_vectors = self.embedder.embed_batch([c.text for c in good_chunks])
-
-        self.bad_store.add_documents(bad_chunks, bad_vectors)
-        self.good_store.add_documents(good_chunks, good_vectors)
-
-        return {
-            "status": "success",
-            "articles_indexed": len(articles),
-            "good_chunks_count": len(good_chunks),
-            "bad_chunks_count": len(bad_chunks)
-        }
-
-    def search_and_compare(self, query_in: SearchQuery) -> SearchResponse:
-        query_vec = self.embedder.embed(query_in.query)
-
-        good_results = self.good_store.similarity_search(query_vec, k=query_in.top_k)
-        bad_results = self.bad_store.similarity_search(query_vec, k=query_in.top_k)
-
-        top_good = good_results[0] if good_results else None
-        top_bad = bad_results[0] if bad_results else None
-
-        analysis_text = (
-            "التقطيع الجيد يسترجع مادة كاملة بسياقها وحكمها الصريح والبيانات الوصفية، "
-            "بينما التتقطيع السيء يبتر الأحكام في منتصف الجملة ويعيد قطعاً متفرقة بدون سياق مفيد."
-        )
-
-        comparison = ChunkingComparisonResult(
-            query=query_in.query,
-            bad_chunking_top_result=top_bad,
-            good_chunking_top_result=top_good,
-            analysis=analysis_text
-        )
-
-        return SearchResponse(
-            good_chunks_results=good_results,
-            bad_chunks_results=bad_results,
-            comparison=comparison
-        )
-
-    def answer_query(self, req: RAGRequest) -> RAGResponse:
-        query_vec = self.embedder.embed(req.query)
-        retrieved_items = self.good_store.similarity_search(query_vec, k=req.top_k)
-
-        answer = self.llm.generate_answer(req.query, retrieved_items)
-
-        return RAGResponse(
-            query=req.query,
-            answer=answer,
-            retrieved_context=retrieved_items,
-            model_used=self.llm.model if self.llm.is_configured() else "Local Simulation Mode"
+        vectors = self.embedder.embed_batch(all_texts)
+        self.store.add_documents(chunks, vectors)
+        
+        self.documents_count += 1
+        self.total_chunks = len(self.store.documents)
+        
+        return UploadResponse(
+            message=f"تم رفع وفهرسة '{filename}' بنجاح.",
+            filename=filename,
+            chunks_count=len(chunks),
+            markdown_preview=markdown_text[:500],
         )
 
     def simple_ask(self, req: SimpleAskRequest) -> SimpleAnswerResponse:
-        """ارسل سؤال واحصل على إجابة نصية واضحة ومباشرة مع مصادرها بحد أقصى سطرين."""
-        import re
+        """ارسل سؤال واحصل على إجابة نصية واضحة ومباشرة مع مصادرها."""
         raw_q = req.question.strip()
+        
         # تنظيف الحروف المتكررة مثل الوووو أو هلاااا
         clean_q = re.sub(r'(.)\1+', r'\1\1', raw_q.lower()).strip()
         clean_q_single = re.sub(r'(.)\1+', r'\1', raw_q.lower()).strip()
         
-        # كشف رسائل التحية والترحيب والنداء
+        # كشف رسائل التحية والترحيب (فقط إذا كانت تحية صرفة بدون سؤال حقيقي)
         greetings = [
             "مرحبا", "مرحباً", "اهلا", "أهلا", "أهلاً", "سلام", "السلام عليكم",
             "صباح الخير", "مساء الخير", "هلا", "هاي", "الو", "الوو", "ألو", "ألوو",
             "هلو", "هللو", "يا هلا", "تحياتي", "hi", "hello", "hey", "halo", "allo"
         ]
         
-        is_greeting = any(
-            clean_q == g or clean_q.startswith(g + " ") or 
-            clean_q_single == g or clean_q_single.startswith(g + " ")
+        # كلمات تدل على وجود سؤال حقيقي بعد التحية
+        question_indicators = [
+            "عن", "شو", "ما", "ماذا", "كيف", "لماذا", "ليش", "متى", "وين", "أين",
+            "من", "هل", "ايش", "إيش", "وش", "كم", "ممكن", "اريد", "أريد", "ابي",
+            "عم", "بدي", "اشرح", "وضح", "فسر", "what", "how", "why", "when", "where",
+            "?", "؟"
+        ]
+        
+        is_pure_greeting = any(
+            clean_q == g or clean_q_single == g
             for g in greetings
         )
         
-        if is_greeting:
+        # إذا بدأت بتحية لكن تحتوي سؤال حقيقي → لا تعاملها كتحية
+        if not is_pure_greeting:
+            starts_with_greeting = any(
+                clean_q.startswith(g + " ") or clean_q_single.startswith(g + " ")
+                for g in greetings
+            )
+            if starts_with_greeting:
+                rest_of_message = clean_q
+                for g in sorted(greetings, key=len, reverse=True):
+                    if rest_of_message.startswith(g + " "):
+                        rest_of_message = rest_of_message[len(g):].strip()
+                        break
+                has_question = any(ind in rest_of_message for ind in question_indicators)
+                if has_question or len(rest_of_message.split()) >= 3:
+                    is_pure_greeting = False
+                else:
+                    is_pure_greeting = True
+        
+        if is_pure_greeting:
             return SimpleAnswerResponse(
                 question=req.question,
-                answer="أهلاً وسهلاً بك! كيف يمكنني مساعدتك في الإجابة عن أي استفسار من واقع البيانات واللوائح المتاحة؟",
-                sources=[]
+                answer="أهلاً وسهلاً بك! كيف يمكنني مساعدتك في الإجابة عن أي استفسار من واقع المستندات المرفوعة؟",
+                sources=[],
+            )
+        
+        # التحقق من وجود مستندات مفهرسة
+        if self.total_chunks == 0 and len(self.store.documents) == 0:
+            return SimpleAnswerResponse(
+                question=req.question,
+                answer="لا توجد مستندات مفهرسة بعد. يرجى رفع ملف PDF أولاً عبر /api/upload.",
+                sources=[],
             )
 
         query_vec = self.embedder.embed(req.question)
-        retrieved_items = self.good_store.similarity_search(query_vec, k=3)
+        retrieved_items = self.store.similarity_search(query_vec, k=3)
 
-        # إذا كانت أعلى نتيجة تشابه ضعيفة جداً (سؤال عشوائي أو لا علاقة له بالبيانات)
+        # إذا كانت أعلى نتيجة تشابه ضعيفة جداً
         max_score = max([item.score for item in retrieved_items], default=0.0)
         if max_score < 0.08 and not self.llm.is_configured():
             return SimpleAnswerResponse(
                 question=req.question,
-                answer="عذراً، هذا السؤال غير متوفر في اللائحة والبيانات المتاحة. يرجى طرح سؤال متعلق بمحتوى البيانات.",
-                sources=[]
+                answer="عذراً، هذا السؤال غير متوفر في المستندات المتاحة. يرجى طرح سؤال متعلق بمحتوى المستندات المرفوعة.",
+                sources=[],
             )
 
         answer = self.llm.generate_answer(req.question, retrieved_items)
@@ -160,25 +156,43 @@ class RAGService:
         sources = []
         if "غير متوفرة" not in answer and "لم يتم العثور" not in answer:
             for item in retrieved_items:
-                title = item.chunk.metadata.get("article_title", "غير محدد")
-                if title not in sources:
-                    sources.append(title)
+                trail = item.chunk.metadata.get("header_trail", "")
+                if trail and trail != "عام" and trail not in sources:
+                    sources.append(trail)
 
         return SimpleAnswerResponse(
             question=req.question,
             answer=answer,
-            sources=sources
+            sources=sources,
         )
+
+    def clear_index(self) -> Dict[str, Any]:
+        """مسح جميع البيانات المفهرسة."""
+        self.store.documents = []
+        self.store.vectors = []
+        if self.store.chroma_collection is not None:
+            try:
+                existing = self.store.chroma_collection.get()
+                if existing and existing.get("ids"):
+                    self.store.chroma_collection.delete(ids=existing["ids"])
+            except Exception:
+                pass
+        self.documents_count = 0
+        self.total_chunks = 0
+        return {"status": "تم مسح جميع البيانات المفهرسة بنجاح."}
 
     def get_health(self) -> HealthResponse:
-        model_name = self.embedder.model_name if self.embedder.using_api else f"{self.embedder.model_name} (Active: Built-in Local)"
+        model_name = (
+            self.embedder.model_name
+            if self.embedder.using_api
+            else f"{self.embedder.model_name} (Active: Built-in Local)"
+        )
         return HealthResponse(
             status="healthy",
-            indexed_articles=self.articles_count,
-            good_chunks_count=len(self.good_store.documents),
-            bad_chunks_count=len(self.bad_store.documents),
+            documents_indexed=self.documents_count,
+            total_chunks=len(self.store.documents),
             openrouter_configured=self.llm.is_configured(),
+            llamaparse_configured=bool(settings.llamaparse_api_key and len(settings.llamaparse_api_key) > 10),
             embedding_model=model_name,
-            embedding_dimensions=self.embedder.last_dimension
+            embedding_dimensions=self.embedder.last_dimension,
         )
-

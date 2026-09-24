@@ -1,86 +1,75 @@
-# نظام RAG المتكامل مع FastAPI و ChromaDB و OpenRouter و Docker
+# RAG Copilot API v3.0
 
-مشروع متكامل ومُهيكل وفق مبادئ البرمجة النظيفة (Clean Code Architecture) يقدم خدمات استرجاع المعلومات الدلالي (RAG)، والتخزين المتجهي باستخدام **ChromaDB**، والربط مع نماذج الذكاء الاصطناعي من **OpenRouter API** عبر واجهات **FastAPI** وتغليفه في حاويات **Docker**.
+تطبيق RAG (Retrieval-Augmented Generation) للإجابة عن الأسئلة بدقة من مستندات PDF المرفوعة عبر الذكاء الاصطناعي.
 
----
-
-## 🏛️ البنية الهيكلية للمشروع (Clean Architecture)
+## 🚀 كيف يعمل؟
 
 ```
-c:\Users\eyad\Desktop\copilot_ai\
-├── app/
-│   ├── __init__.py
-│   ├── config.py           # إدارة التكوينات ومتغيرات البيئة (Pydantic Settings)
-│   ├── models.py           # نماذج البيانات (Pydantic Schemas)
-│   ├── prompts.py          # مستودع نصوص التوجيه (System Prompt & User Prompt)
-│   ├── reader.py           # قراءة المستندات وتحليل المواد مع كشف الترميز
-│   ├── chunker.py          # التتقطيع الجيد والسيء (Good vs Bad Chunking)
-│   ├── embedder.py         # محرك التضمين الدلالي (Semantic Vectorizer)
-│   ├── vector_store.py     # مخزن المتجهات باستخدام ChromaDB Persistent Client
-│   ├── llm.py              # عميل الاتصال بـ OpenRouter LLM API
-│   └── service.py          # منسق الخدمة الرئيسي (RAG Service Orchestrator)
-├── main.py                 # تطبيق FastAPI ونقاط الاتصال (REST API)
-├── data/
-│   └── data.txt            # ملف البيانات الأساسية (مقسّم مادة مادة)
-├── vector_db/              # قاعدة بيانات ChromaDB المحفوظة محلياً
-├── Dockerfile              # بناء صورة دوكر للمشروع
-├── docker-compose.yml      # تشغيل الحاوية بأمر واحد
-├── .gitignore              # استبعاد الملفات الحساسة والمؤقتة
-├── .dockerignore           # تحسين بناء صورة Docker
-├── requirements.txt        # مكتبات بايثون المطلوبة (تتضمن ChromaDB)
-├── .env.example            # نموذج متغيرات البيئة
-└── README.md               # التوثيق الشامل
+رفع PDF → تحويل إلى Markdown (LlamaParse) → تقطيع ذكي → تضمين وفهرسة → اسأل أي سؤال
 ```
 
----
+### تقنيات التقطيع الذكي
 
-## 📝 نصوص التوجيه (Prompts Repository)
+1. **التقطيع حسب العناوين (MarkdownHeaderTextSplitter)**
+   - يمسح النص سطراً بسطر ويكتشف العناوين (#, ##, ###)
+   - يفرز كل فقرة تحت عنوانها
+   - يُخزن شجرة العناوين في البيانات الوصفية (Metadata) لكل قطعة
 
-تم فصل نصوص التوجيه في ملف مستقل [`app/prompts.py`](file:///c:/Users/eyad/Desktop/copilot_ai/app/prompts.py):
+2. **حقن السياق (Context Injection)**
+   - يضيف مسار العناوين كبادئة لكل قطعة نصية
+   - قبل: `السعر: 50 دولار`
+   - بعد: `[المنتجات > الهواتف > آيفون 13] السعر: 50 دولار`
+   - يحول الـ Vector إلى تمثيل دلالي دقيق ولا يفقد معناه
 
-- **System Prompt (`SYSTEM_PROMPT`):** يوجه الـ LLM للالتزام فقط بسياق المواد المتاحة وذكر رقم المادة المستند عليها.
-- **User Prompt (`USER_PROMPT_TEMPLATE`):** قوالب لتأطير سياق المواد المسترجعة وسؤال المستخدم بشكل محكم.
-
----
-
-## 🗄️ التخزين المتجهي (ChromaDB Integration)
-
-يتم تخزين المتجهات والنصوص والـ Metadata و Document IDs محلياً على القرص في مجلد `vector_db/` باستخدام **ChromaDB (PersistentClient)** مع فهارس `hnsw:space: cosine` لضمان سرعة فائقة في الاسترجاع والبحث الدلالي.
-
----
-
-## 🔑 ضبط مفتاح OpenRouter API
-
-قم بتعديل ملف `.env` وحط المفتاح الخاص بك:
-
-```env
-OPENROUTER_API_KEY=sk-or-v1-your-api-key-here
-OPENROUTER_MODEL=openai/gpt-4o-mini
-```
-
----
-
-## 🚀 طرق التشغيل
-
-### الطريقة 1: التشغيل المحلي المباشر (FastAPI / Uvicorn)
-
-1. **تثبيت التبعيات:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-2. **تشغيل سيرفر FastAPI:**
-   ```bash
-   python main.py
-   ```
-
-3. **تصفح التوثيق التفاعلي (Swagger UI):**
-   [http://localhost:8000/docs](http://localhost:8000/docs)
-
----
-
-### الطريقة 2: التشغيل باستخدام Docker Compose
+## 📦 التثبيت
 
 ```bash
-docker-compose up --build
+pip install -r requirements.txt
+```
+
+## ⚙️ الإعدادات
+
+أنشئ ملف `.env`:
+
+```env
+OPENROUTER_API_KEY=your_openrouter_api_key_here
+OPENROUTER_MODEL=openai/gpt-4o-mini
+EMBEDDING_MODEL_NAME=openai/text-embedding-3-large
+LLAMAPARSE_API_KEY=your_llamaparse_api_key_here
+VECTOR_DB_DIR=vector_db
+UPLOAD_DIR=uploads
+HOST=0.0.0.0
+PORT=8000
+```
+
+## 🏃 التشغيل
+
+```bash
+python main.py
+```
+
+ثم افتح: http://localhost:8000/docs
+
+## 🔗 الـ Endpoints
+
+| Method | Endpoint | الوصف |
+|--------|----------|-------|
+| `POST` | `/api/upload` | رفع ملف PDF للتحويل والفهرسة |
+| `POST` | `/api/ask` | إرسال سؤال والحصول على إجابة |
+| `GET` | `/api/health` | فحص حالة النظام |
+| `POST` | `/api/clear` | مسح جميع البيانات المفهرسة |
+
+## 📝 أمثلة الاستخدام
+
+### رفع ملف PDF
+```bash
+curl -X POST "http://localhost:8000/api/upload" \
+  -F "file=@document.pdf"
+```
+
+### طرح سؤال
+```bash
+curl -X POST "http://localhost:8000/api/ask" \
+  -H "Content-Type: application/json" \
+  -d '{"question": "ما هي ساعات العمل الرسمية؟"}'
 ```

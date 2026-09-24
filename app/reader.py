@@ -1,68 +1,138 @@
-import re
-from typing import List, Dict
+"""
+PDF Reader — تحويل ملفات PDF إلى Markdown عبر LlamaParse API
+"""
+import os
+import requests
+import time
+from typing import Optional
+from app.config import settings
 
 
-def read_text_file(file_path: str) -> str:
-    """قراءة المستند مع تجربة الترميزات الأكثر شيوعاً للنصوص العربية."""
-    encodings = ["utf-8", "utf-8-sig", "windows-1256", "cp1256", "iso-8859-6", "latin1"]
-    for enc in encodings:
-        try:
-            with open(file_path, "r", encoding=enc) as f:
-                content = f.read()
-                if content and len(content.strip()) > 10:
-                    return content
-        except (UnicodeDecodeError, FileNotFoundError):
-            continue
-            
-    with open(file_path, "rb") as f:
-        raw = f.read()
-        return raw.decode("utf-8", errors="ignore")
+LLAMAPARSE_UPLOAD_URL = "https://api.cloud.llamaindex.ai/api/parsing/upload"
+LLAMAPARSE_STATUS_URL = "https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}"
+LLAMAPARSE_RESULT_URL = "https://api.cloud.llamaindex.ai/api/parsing/job/{job_id}/result/markdown"
 
 
-def parse_articles(raw_text: str) -> List[Dict[str, str]]:
+def convert_pdf_to_markdown(pdf_path: str) -> str:
     """
-    استخراج المواد بشكل منظم (مادة مادة).
-    """
-    lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
-    articles = []
+    رفع ملف PDF إلى LlamaParse API وتحويله إلى Markdown.
     
-    article_pattern = re.compile(r'^(المادة|مادة)\s*(\(?\d+\)?|[^\:\-]+)[\:\-]?\s*(.*)', re.IGNORECASE)
-    current_art = None
-    
-    for line in lines:
-        match = article_pattern.match(line)
-        if match:
-            if current_art:
-                articles.append(current_art)
-            art_num = match.group(2).strip("():- ")
-            art_title = match.group(3).strip()
-            current_art = {
-                "title": f"المادة {art_num}" + (f": {art_title}" if art_title else ""),
-                "article_id": f"art_{art_num}",
-                "content": line
-            }
-        else:
-            if current_art:
-                current_art["content"] += "\n" + line
-            else:
-                current_art = {
-                    "title": "مقدمة / عام",
-                    "article_id": "art_intro",
-                    "content": line
-                }
-                
-    if current_art:
-        articles.append(current_art)
+    Args:
+        pdf_path: المسار المحلي لملف PDF
         
-    if len(articles) <= 1 and len(lines) > 3:
-        articles = []
-        for idx, para in enumerate(raw_text.split("\n\n"), 1):
-            para = para.strip()
-            if para:
-                articles.append({
-                    "title": f"المادة/الفقرة {idx}",
-                    "article_id": f"art_{idx}",
-                    "content": para
-                })
-                
-    return articles
+    Returns:
+        النص بتنسيق Markdown
+    """
+    api_key = settings.llamaparse_api_key
+    if not api_key or len(api_key) < 10:
+        raise ValueError("مفتاح LlamaParse API غير مُعَد. يرجى ضبط LLAMAPARSE_API_KEY في ملف .env")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json",
+    }
+
+    # رفع الملف
+    with open(pdf_path, "rb") as f:
+        files = {"file": (os.path.basename(pdf_path), f, "application/pdf")}
+        data = {
+            "language": "ar",
+            "parsing_instruction": "Extract all text preserving headings and structure as Markdown with Arabic support.",
+        }
+        resp = requests.post(LLAMAPARSE_UPLOAD_URL, headers=headers, files=files, data=data, timeout=60)
+        resp.raise_for_status()
+        job_info = resp.json()
+
+    job_id = job_info.get("id")
+    if not job_id:
+        raise RuntimeError(f"لم يتم الحصول على job_id من LlamaParse: {job_info}")
+
+    # انتظار اكتمال المعالجة
+    status_url = LLAMAPARSE_STATUS_URL.format(job_id=job_id)
+    for _ in range(120):  # 120 محاولة × 2 ثانية = 4 دقائق كحد أقصى
+        time.sleep(2)
+        status_resp = requests.get(status_url, headers=headers, timeout=20)
+        status_resp.raise_for_status()
+        status_data = status_resp.json()
+        status = status_data.get("status", "")
+
+        if status == "SUCCESS":
+            break
+        elif status in ("ERROR", "FAILED"):
+            raise RuntimeError(f"فشلت معالجة الملف في LlamaParse: {status_data}")
+    else:
+        raise TimeoutError("انتهت مهلة الانتظار لمعالجة الملف في LlamaParse (4 دقائق).")
+
+    # جلب النتيجة بتنسيق Markdown
+    result_url = LLAMAPARSE_RESULT_URL.format(job_id=job_id)
+    result_resp = requests.get(result_url, headers=headers, timeout=30)
+    result_resp.raise_for_status()
+    result_data = result_resp.json()
+
+    markdown_text = result_data.get("markdown", "")
+    if not markdown_text:
+        raise RuntimeError("لم يتم استلام نص Markdown من LlamaParse.")
+
+    return markdown_text
+
+
+def convert_pdf_bytes_to_markdown(pdf_bytes: bytes, filename: str = "document.pdf") -> str:
+    """
+    تحويل بايتات PDF إلى Markdown عبر LlamaParse API.
+    
+    Args:
+        pdf_bytes: محتوى ملف PDF كبايتات
+        filename: اسم الملف الأصلي
+        
+    Returns:
+        النص بتنسيق Markdown
+    """
+    api_key = settings.llamaparse_api_key
+    if not api_key or len(api_key) < 10:
+        raise ValueError("مفتاح LlamaParse API غير مُعَد. يرجى ضبط LLAMAPARSE_API_KEY في ملف .env")
+
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "accept": "application/json",
+    }
+
+    files = {"file": (filename, pdf_bytes, "application/pdf")}
+    data = {
+        "language": "ar",
+        "parsing_instruction": "Extract all text preserving headings and structure as Markdown with Arabic support.",
+    }
+    resp = requests.post(LLAMAPARSE_UPLOAD_URL, headers=headers, files=files, data=data, timeout=60)
+    resp.raise_for_status()
+    job_info = resp.json()
+
+    job_id = job_info.get("id")
+    if not job_id:
+        raise RuntimeError(f"لم يتم الحصول على job_id من LlamaParse: {job_info}")
+
+    # انتظار اكتمال المعالجة
+    status_url = LLAMAPARSE_STATUS_URL.format(job_id=job_id)
+    for _ in range(120):
+        time.sleep(2)
+        status_resp = requests.get(status_url, headers=headers, timeout=20)
+        status_resp.raise_for_status()
+        status_data = status_resp.json()
+        status = status_data.get("status", "")
+
+        if status == "SUCCESS":
+            break
+        elif status in ("ERROR", "FAILED"):
+            raise RuntimeError(f"فشلت معالجة الملف في LlamaParse: {status_data}")
+    else:
+        raise TimeoutError("انتهت مهلة الانتظار لمعالجة الملف في LlamaParse (4 دقائق).")
+
+    # جلب النتيجة بتنسيق Markdown
+    result_url = LLAMAPARSE_RESULT_URL.format(job_id=job_id)
+    result_resp = requests.get(result_url, headers=headers, timeout=30)
+    result_resp.raise_for_status()
+    result_data = result_resp.json()
+
+    markdown_text = result_data.get("markdown", "")
+    if not markdown_text:
+        raise RuntimeError("لم يتم استلام نص Markdown من LlamaParse.")
+
+    return markdown_text

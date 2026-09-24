@@ -7,7 +7,7 @@ from app.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 class OpenRouterLLM:
     """
-    عميل الربط مع OpenRouter API لتوليد إجابات دقيقة بناءً على سياق المواد المسترجعة والـ Prompts.
+    عميل الربط مع OpenRouter API لتوليد إجابات دقيقة بناءً على سياق المستندات المسترجعة.
     """
     def __init__(self):
         self.url = "https://openrouter.ai/api/v1/chat/completions"
@@ -25,12 +25,12 @@ class OpenRouterLLM:
         return bool(key and key != "your_openrouter_api_key_here" and len(key) > 10)
 
     def generate_answer(self, query: str, context_chunks: List[SearchResultItem]) -> str:
-        # صياغة السياق المنسق من المواد
+        # صياغة السياق المنسق من القطع المسترجعة
         formatted_context = ""
         
         for idx, item in enumerate(context_chunks, 1):
-            title = item.chunk.metadata.get("article_title", f"المادة {idx}")
-            formatted_context += f"--- {title} (ID: {item.chunk.id}) ---\n{item.chunk.text}\n\n"
+            header_trail = item.chunk.metadata.get("header_trail", f"قسم {idx}")
+            formatted_context += f"--- [{header_trail}] (ID: {item.chunk.id}, تشابه: {item.score:.2f}) ---\n{item.chunk.text}\n\n"
 
         user_prompt = USER_PROMPT_TEMPLATE.format(
             context=formatted_context.strip(),
@@ -38,15 +38,15 @@ class OpenRouterLLM:
         )
 
         if not self.is_configured():
-            # بناء إجابة محلية نظيفة من النصوص المسترجعة بدون الحاجة لـ LLM
+            # بناء إجابة محلية من النصوص المسترجعة بدون LLM
             if not context_chunks:
-                return "لم يتم العثور على معلومات متعلقة بسؤالك في البيانات المتاحة."
+                return "لم يتم العثور على معلومات متعلقة بسؤالك في المستندات المتاحة."
             
-            answer_parts = ["بناءً على البيانات المتاحة:\n"]
+            answer_parts = ["بناءً على المستندات المتاحة:\n"]
             for idx, item in enumerate(context_chunks, 1):
-                title = item.chunk.metadata.get("article_title", f"مصدر {idx}")
+                trail = item.chunk.metadata.get("header_trail", f"مصدر {idx}")
                 text = item.chunk.text.strip()
-                answer_parts.append(f"{idx}. [{title}]: {text}\n")
+                answer_parts.append(f"{idx}. [{trail}]: {text}\n")
             
             answer_parts.append("\n(ملاحظة: لتفعيل الإجابة الذكية بالذكاء الاصطناعي، يرجى ضبط OPENROUTER_API_KEY في ملف .env)")
             return "\n".join(answer_parts)
@@ -65,7 +65,7 @@ class OpenRouterLLM:
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.2,
-            "max_tokens": 200
+            "max_tokens": 300
         }
 
         try:

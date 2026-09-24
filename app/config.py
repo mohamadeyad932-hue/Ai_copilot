@@ -12,10 +12,14 @@ class Settings(BaseSettings):
     openrouter_site_url: str = "https://github.com/mohamadeyad932-hue/Ai_copilot"
     openrouter_site_name: str = "RAG Copilot Lab"
     
+    # مفتاح LlamaParse API لتحويل PDF إلى Markdown
+    llamaparse_api_key: str = ""
+    
     # اسم نموذج التضمين (يمكن تغييره بسهولة من .env)
     embedding_model_name: str = "paraphrase-multilingual-MiniLM-L12-v2"
     
-    data_file_path: str = "data/data.txt"
+    # مجلد تخزين الملفات المرفوعة
+    upload_dir: str = "uploads"
     vector_db_dir: str = "vector_db"
     
     host: str = "0.0.0.0"

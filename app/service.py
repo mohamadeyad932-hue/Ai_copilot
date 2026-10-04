@@ -7,6 +7,7 @@ import re
 from typing import Dict, Any, List
 from app.config import settings
 from app.reader import convert_pdf_bytes_to_markdown
+from app.ocr import analyze_image, ALLOWED_IMAGE_EXTENSIONS
 from app.chunker import smart_chunk
 from app.embedder import Embedder
 from app.vector_store import LocalVectorStore
@@ -76,6 +77,49 @@ class RAGService:
             filename=filename,
             chunks_count=len(chunks),
             markdown_preview=markdown_text[:500],
+        )
+
+    def process_uploaded_image(self, image_bytes: bytes, filename: str) -> UploadResponse:
+        """
+        معالجة صورة مرفوعة:
+        1. تحليل الصورة عبر Vision LLM (استخراج نص أو وصف) → Markdown
+        2. تقطيع ذكي (نفس خط الأنابيب المستخدم للـ PDF)
+        3. تضمين وفهرسة في المخزن المتجهي
+        """
+        # الخطوة 1: تحليل الصورة → Markdown
+        markdown_text = analyze_image(image_bytes, filename)
+        
+        # حفظ نسخة Markdown محلياً
+        os.makedirs(settings.upload_dir, exist_ok=True)
+        md_path = os.path.join(settings.upload_dir, f"{os.path.splitext(filename)[0]}.md")
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write(markdown_text)
+        
+        # الخطوة 2: التقطيع الذكي (نفس الدالة المستخدمة للـ PDF)
+        chunks = smart_chunk(markdown_text, max_chunk_size=500, overlap=80)
+        
+        if not chunks:
+            return UploadResponse(
+                message="تم تحليل الصورة لكن لم يتم استخراج أي قطع نصية.",
+                filename=filename,
+                chunks_count=0,
+                markdown_preview=markdown_text[:500],
+            )
+        
+        # الخطوة 3: التضمين والفهرسة (نفس الكود المستخدم للـ PDF)
+        all_texts = [c.text for c in chunks]
+        self.embedder.fit_vocabulary(all_texts)
+        vectors = self.embedder.embed_batch(all_texts)
+        self.store.add_documents(chunks, vectors)
+        
+        self.documents_count += 1
+        self.total_chunks = len(self.store.documents)
+        
+        return UploadResponse(
+            message=f"تم تحليل وفهرسة الصورة '{filename}' بنجاح.",
+            filename=filename,
+            chunks_count=len(chunks),
+            markdown_preview="تم استخراج النصوص من الصورة بنجاح",
         )
 
     def simple_ask(self, req: SimpleAskRequest) -> SimpleAnswerResponse:

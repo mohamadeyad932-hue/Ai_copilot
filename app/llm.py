@@ -65,7 +65,7 @@ class OpenRouterLLM:
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": 0.2,
-            "max_tokens": 300
+            "max_tokens": 1500
         }
 
         try:
